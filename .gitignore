@@ -112,6 +112,9 @@ venv.bak/
 # Rope project settings
 .ropeproject
 
+# VSCode
+.vscode/
+
 # mkdocs documentation
 /site
 
@@ -125,3 +128,4 @@ dmypy.json
 
 # My files and directories
 logs/*
+others/

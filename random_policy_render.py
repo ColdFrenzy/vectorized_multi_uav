@@ -10,7 +10,9 @@ from custom_scenario_utils import get_obstacles_position
 # LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libffi.so.7 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -s "-screen 0 1400x900x24" python random_policy_render.py
 
 
-
+import pyvirtualdisplay
+display = pyvirtualdisplay.Display(visible=False, size=(1400, 900))
+display.start()
 
 def use_vmas_env(
     render: bool,
@@ -127,5 +129,5 @@ if __name__ == "__main__":
         agent_max_speed = 13,
         lidar_range=2,
         agent_radius=0.4,
-
     )
+    display.stop()
