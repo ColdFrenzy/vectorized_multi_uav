@@ -1,6 +1,6 @@
 from vmas.simulator.utils import ScenarioUtils
 from typing import Dict, List, Sequence, Tuple, Union
-from torch import Tensor
+from torch import Tensor, device
 import torch
 import warnings
 
@@ -18,6 +18,8 @@ class CustomScenarioUtils(ScenarioUtils):
         min_dist_between_entities: float,
         x_bounds: Tuple[int, int],
         y_bounds: Tuple[int, int],
+        walls: List[Tensor],
+        wall_configs: List[Dict],
         occupied_positions: Tensor = None,
         disable_warn: bool = False,
     ):
@@ -28,11 +30,17 @@ class CustomScenarioUtils(ScenarioUtils):
                 (batch_size, 0, world.dim_p), device=world.device
             )
         for i, obstacle in enumerate(obstacles):
-            pos = torch.tensor(list(obstacles_positions[i])).repeat(world.batch_dim, 1).unsqueeze(1) # pos shape: (1, dim_p)
+            pos = torch.tensor(list(obstacles_positions[i]), device=world.device, dtype=torch.float32).view(1, 1, -1).repeat(batch_size, 1, 1) # pos shape: (batch_size, 1, dim_p)
             occupied_positions = torch.cat([occupied_positions, pos], dim=1) # occupied_positions shape: (batch_size, num_entities, dim_p)
             obstacle.set_pos(pos.squeeze(1), batch_index=env_index)
+        
+        for wall, config in zip(walls, wall_configs):
+            wall_pos = torch.tensor(config["pos"], device=world.device, dtype=torch.float32).view(1, 1, -1).repeat(batch_size, 1, 1) # wall_pos shape: (batch_size, 1, dim_p)
+            wall_rot = torch.tensor([config["rot"]], device=world.device, dtype=torch.float32).view(1, 1, -1).repeat(batch_size, 1, 1) # wall_rot shape: (batch_size, 1, 1)
+            occupied_positions = torch.cat([occupied_positions, wall_pos], dim=1) # occupied_positions shape: (batch_size, num_entities, dim_p)
+            wall.set_pos(wall_pos.squeeze(1), batch_index=env_index)
+            wall.set_rot(wall_rot.squeeze(1), batch_index=env_index)
 
-        # TODO: goals should cover exactly one cell
         for entity in entities:
             if entity.name.startswith("goal"):
                 pos = CustomScenarioUtils.find_random_int_pos_for_entity(
@@ -72,19 +80,19 @@ class CustomScenarioUtils(ScenarioUtils):
         pos = None
         tries = 0
         while True:
-            # TODO: change -0.5 to a parameter to control the offset
+            # Shift integer grid picks to centered cell coordinates inside bounds.
             proposed_pos = torch.cat(
                 [
                     torch.empty(
                         (batch_size, 1, 1),
                         device=world.device,
                         dtype=torch.float32,
-                    ).random_(*x_bounds) - 0.5,
+                    ).random_(*x_bounds) + 0.5,
                     torch.empty(
                         (batch_size, 1, 1),
                         device=world.device,
                         dtype=torch.float32,
-                    ).random_(*y_bounds) - 0.5,
+                    ).random_(*y_bounds) + 0.5,
                 ],
                 dim=2,
             )

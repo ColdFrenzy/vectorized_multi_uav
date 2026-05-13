@@ -1,3 +1,4 @@
+import pathlib
 import copy
 import torch
 from typing import Callable, Optional
@@ -10,6 +11,10 @@ from benchmarl.algorithms import MappoConfig
 from benchmarl.models.mlp import MlpConfig
 from benchmarl.experiment import Experiment
 from custom_scenario_utils import get_obstacles_position
+
+
+
+MAX_STEPS = 200
 
 def get_env_fun(
     self,
@@ -52,19 +57,21 @@ experiment_config = ExperimentConfig.get_from_yaml() # We start by loading the d
 # Override devices
 experiment_config.sampling_device = vmas_device
 experiment_config.train_device = train_device
-experiment_config.max_n_frames = 10_000 # 10_000_000 # Number of frames before training ends
+experiment_config.max_n_frames = 40_000_000 # Number of frames before training ends
 experiment_config.gamma = 0.99
-experiment_config.on_policy_collected_frames_per_batch = 2000 # 60_000 # Number of frames collected each iteration
-experiment_config.on_policy_n_envs_per_worker = 5 # 600 # Number of vmas vectorized enviornemnts (each will collect 100 steps, see max_steps in task_config -> 600 * 100 = 60_000 the number above)
-experiment_config.on_policy_n_minibatch_iters = 10 # 45
-experiment_config.on_policy_minibatch_size = 256 # 4096
+experiment_config.on_policy_collected_frames_per_batch = 60_000 # 2000 # Number of frames collected each iteration
+experiment_config.on_policy_n_envs_per_worker = 600 # 8 # Number of vmas vectorized enviornemnts (each will collect 100 steps, see max_steps in task_config -> 600 * 100 = 60_000 the number above)
+experiment_config.on_policy_n_minibatch_iters = 45 # 10
+experiment_config.on_policy_minibatch_size = 4096 # 200
 experiment_config.evaluation = True
 experiment_config.render = True
 experiment_config.share_policy_params = True # Policy parameter sharing on
-experiment_config.evaluation_interval = 4000 # 120_000 # Interval in terms of frames, will evaluate every 120_000 / 60_000 = 2 iterations
-experiment_config.evaluation_episodes = 20 # 200 # Number of vmas vectorized enviornemnts used in evaluation
-experiment_config.loggers = ["csv"] #wandb
-
+experiment_config.evaluation_interval = 120_000 # 100_000 # Interval in terms of frames, will evaluate every 120_000 / 60_000 = 2 iterations
+experiment_config.evaluation_episodes = 200 # 20 # Number of vmas vectorized enviornemnts used in evaluation
+experiment_config.loggers = ["wandb"] #wandb
+experiment_config.project_name = "DEMO test easy map" # vectorized_multi_uav"
+# experiment_config.checkpoint_interval = 500_000
+experiment_config.save_folder = pathlib.Path(__file__).parent / "logs" 
 ###############
 # TASK CONFIG #
 ###############
@@ -88,7 +95,7 @@ world_spawning_y = len(map_string.split("\n")[1].split(" "))
 obstacles_initial_positions = list(get_obstacles_position(map_string, world_spawning_x, world_spawning_y, offset=0.5))
 
 task.config = {
-        "max_steps": 100,
+        "max_steps": MAX_STEPS,
         "n_agents_holonomic": 2,
         "n_agents_diff_drive": 0,
         "n_agents_car": 0,
@@ -104,8 +111,16 @@ task.config = {
         "viewer_zoom": 3, # Zoom level for the viewer
         "agent_max_speed": 13,
         "agent_radius": 0.4,
+        # "u_multiplier": [0.0, 3.0, 3.0, 3.0], # 2 for holonomic, 4 for UAV (thrust + x,y,z torque)
+        # "u_noise": 0.0,
+        # "u_range":  [1.0, 1.0, 1.0, 1.0],
+        "u_multiplier": [3.0, 3.0], # 2 for holonomic, 4 for UAV (thrust + x,y,z torque)
+        "u_noise": 0.0,
+        "u_range":  [1.0, 1.0],
+        "dt": 1,
 }
-
+# agent action u is a force
+# u = action (output from the policy) -> u_final = (clamp(u, -u_range, u_range) * u_multiplier) + u_noise
 ####################
 # ALGORITHM CONFIG #
 ####################
@@ -128,7 +143,7 @@ algorithm_config = MappoConfig(
 # MODEL CONFIG #
 ################
 model_config = MlpConfig(
-        num_cells=[256, 256], # Two layers with 256 neurons each
+        num_cells=[256, 124, 64], # [256, 256], # Two layers with 256 neurons each
         layer_class=torch.nn.Linear,
         activation_class=torch.nn.Tanh,
     )

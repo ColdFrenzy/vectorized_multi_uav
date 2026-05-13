@@ -1,4 +1,5 @@
 import time
+import os
 import torch
 from vmas import make_env
 from vmas.simulator.core import Agent
@@ -9,10 +10,6 @@ from custom_scenario_utils import get_obstacles_position
 # conda activate vmas 
 # LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libffi.so.7 LIBGL_ALWAYS_SOFTWARE=1 xvfb-run -s "-screen 0 1400x900x24" python random_policy_render.py
 
-
-import pyvirtualdisplay
-display = pyvirtualdisplay.Display(visible=False, size=(1400, 900))
-display.start()
 
 def use_vmas_env(
     render: bool,
@@ -79,7 +76,8 @@ def use_vmas_env(
         from moviepy import ImageSequenceClip
         fps=30
         clip = ImageSequenceClip(frame_list, fps=fps)
-        clip.write_gif(f'{scenario_name}.gif', fps=fps)
+        os.makedirs('gif', exist_ok=True)
+        clip.write_gif(os.path.join('gif', f'{scenario_name}.gif'), fps=fps)
 
 
 if __name__ == "__main__":
@@ -130,4 +128,3 @@ if __name__ == "__main__":
         lidar_range=2,
         agent_radius=0.4,
     )
-    display.stop()

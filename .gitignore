@@ -129,3 +129,4 @@ dmypy.json
 # My files and directories
 logs/*
 others/
+gif/*

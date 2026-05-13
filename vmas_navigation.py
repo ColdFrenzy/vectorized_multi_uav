@@ -8,6 +8,7 @@ from torch import Tensor
 from vmas.simulator.core import Agent, Box, Landmark, Sphere, World
 from vmas.simulator.dynamics.diff_drive import DiffDrive
 from vmas.simulator.dynamics.holonomic import Holonomic
+from vmas.simulator.dynamics.drone import Drone
 from vmas.simulator.dynamics.kinematic_bicycle import KinematicBicycle
 from vmas.simulator.scenario import BaseScenario
 from vmas.simulator.sensors import Lidar
@@ -43,6 +44,17 @@ class MultiUAVNavigation(BaseScenario):
         self.n_agents = (
             self.n_agents_holonomic 
         )
+        # Holonomic
+        u_multiplier = kwargs.pop("u_multiplier", [1.0, 1.0]) 
+        u_noise = kwargs.pop("u_noise", [0.0, 0.0])
+        u_range = kwargs.pop("u_range", [1.0, 1.0])
+        # Drone
+        # 0.0 on the first u_multiplier since we want the uav to not fly over obstacles
+        # set gravity to (0, 0)
+        # u_multiplier = kwargs.pop("u_multiplier", [0.0, 3.0, 3.0, 3.0])
+        # u_noise = kwargs.pop("u_noise", 0)
+        # u_range = kwargs.pop("u_range", [1.0, 1.0, 1.0, 1.0])
+        dt = kwargs.pop("dt", 0.1) # Simulation timestep,
         self.agent_max_speed = kwargs.pop("max_speed", 5)
         self.n_obstacles = kwargs.pop("n_obstacles", 2)
         self.world_spawning_x = kwargs.pop(
@@ -78,7 +90,6 @@ class MultiUAVNavigation(BaseScenario):
         self.obstacles_initial_positions = kwargs.pop(
             "obstacles_initial_positions", None
         )  # If you want to spawn obstacles at fixed positions pass a list of tensors with 
-
         self.viewer_size = kwargs.pop("viewer_size", (1400, 900))  # Size of the viewer window in pixels
         self.grid_spacing = kwargs.pop("grid_spacing", 1)  # Spacing between grid lines in the rendering
         self.viewer_zoom = kwargs.pop("viewer_zoom", 4)  # Zoom level for the viewer
@@ -92,18 +103,17 @@ class MultiUAVNavigation(BaseScenario):
         world = World(
             batch_dim,  # Number of environments simulated
             device,  # Device for simulation
-            substeps=5,  # Number of physical substeps (more yields more accurate but more expensive physics)
+            substeps=25,  # Number of physical substeps (more yields more accurate but more expensive physics)
             collision_force=500,  # Paramneter to tune for collisions
             x_semidim = self.world_spawning_y/2, # boundary of the world
             y_semidim = self.world_spawning_x/2, # boundary of the world
-            dt=0.1,  # Simulation timestep
+            dt=dt,  # Simulation timestep
             gravity=(0.0, 0.0),  # Customizable gravity
             drag=DRAG,  # Physics parameters
             linear_friction=LINEAR_FRICTION,  # Physics parameters
             angular_friction=ANGULAR_FRICTION,  # Physics parameters
             # There are many more....
         )
-
 
 
         ################
@@ -145,6 +155,19 @@ class MultiUAVNavigation(BaseScenario):
             ]  # Agent LIDAR sensor
 
             if i < self.n_agents_holonomic:
+                # agent = Agent(
+                #     name=f"uav_{i}",
+                #     collide=True,
+                #     color=color,
+                #     render_action=True,
+                #     sensors=sensors,
+                #     max_speed = self.agent_max_speed, 
+                #     shape=Sphere(radius=self.agent_radius),
+                #     u_range=u_range,  # Ranges for actions
+                #     u_multiplier=u_multiplier,  # Action multipliers
+                #     u_noise=u_noise, # Action noise
+                #     dynamics=Drone(world),  # If you got to its class you can see it has 2 actions: force_x, and force_y
+                # )
                 agent = Agent(
                     name=f"holonomic_{i}",
                     collide=True,
@@ -153,43 +176,10 @@ class MultiUAVNavigation(BaseScenario):
                     sensors=sensors,
                     max_speed = self.agent_max_speed, 
                     shape=Sphere(radius=self.agent_radius),
-                    u_range=[1, 1],  # Ranges for actions
-                    u_multiplier=[1, 1],  # Action multipliers
+                    u_range=u_range,  # Ranges for actions
+                    u_multiplier=u_multiplier,  # Action multipliers
+                    u_noise=u_noise, # Action noise
                     dynamics=Holonomic(),  # If you got to its class you can see it has 2 actions: force_x, and force_y
-                )
-            elif i < self.n_agents_holonomic + self.n_agents_diff_drive:
-                agent = Agent(
-                    name=f"diff_drive_{i - self.n_agents_holonomic}",
-                    collide=True,
-                    color=color,
-                    render_action=True,
-                    sensors=sensors,
-                    shape=Sphere(radius=self.agent_radius),
-                    u_range=[1, 1],  # Ranges for actions
-                    u_multiplier=[0.5, 1],  # Action multipliers
-                    dynamics=DiffDrive(
-                        world
-                    ),  # If you go to its class you can see it has 2 actions: forward velocity and angular velocity
-                )
-            else:
-                max_steering_angle = torch.pi / 4
-                width = self.agent_radius
-                agent = Agent(
-                    name=f"car_{i-self.n_agents_holonomic-self.n_agents_diff_drive}",
-                    collide=True,
-                    color=color,
-                    render_action=True,
-                    sensors=sensors,
-                    shape=Box(length=self.agent_radius * 2, width=width),
-                    u_range=[1, max_steering_angle],
-                    u_multiplier=[0.5, 1],
-                    dynamics=KinematicBicycle(
-                        world,
-                        width=width,
-                        l_f=self.agent_radius,  # Distance between the front axle and the center of gravity
-                        l_r=self.agent_radius,  # Distance between the rear axle and the center of gravity
-                        max_steering_angle=max_steering_angle,
-                    ),  # If you got to its class you can see it has 2 actions: forward velocity and steering angle
                 )
             agent.pos_rew = torch.zeros(
                 batch_dim, device=device
@@ -229,6 +219,34 @@ class MultiUAVNavigation(BaseScenario):
             world.add_landmark(obstacle)
             self.obstacles.append(obstacle)
 
+        ################
+        # Add walls
+        ################
+        self.walls = (
+            []
+        )
+        wall_thickness = 1
+
+        # Create 4 walls: Top, Bottom, Left, Right
+        self.wall_configs = [
+            {"name": "top_wall",    "pos": [0, self.world_spawning_x/2 + wall_thickness/2],  "length": self.world_spawning_y + 2*wall_thickness, "rot": 0},
+            {"name": "bottom_wall", "pos": [0, -self.world_spawning_x/2 - wall_thickness/2], "length": self.world_spawning_y + 2*wall_thickness, "rot": 0},
+            {"name": "left_wall",   "pos": [-self.world_spawning_y/2 - wall_thickness/2, 0], "length": self.world_spawning_x + 2*wall_thickness, "rot": 1.57}, # 90 degrees
+            {"name": "right_wall",  "pos": [self.world_spawning_y/2 + wall_thickness/2, 0],  "length": self.world_spawning_x + 2*wall_thickness, "rot": 1.57},
+        ]
+
+        for config in self.wall_configs:
+            wall = Landmark(
+                name=config["name"],
+                collide=True,           # This makes it a physical barrier
+                movable=False,         # Static wall
+                shape=Box(length=config["length"], width=wall_thickness),  # Long thin rectangle
+                color=Color.BLACK,
+            )
+
+            world.add_landmark(wall)
+            self.walls.append(wall)
+
         self.pos_rew = torch.zeros(
             batch_dim, device=device
         )  # Tensor that will hold the global position reward
@@ -254,6 +272,8 @@ class MultiUAVNavigation(BaseScenario):
             self.min_distance_between_entities,
             x_bounds=(-int(self.world_spawning_x/2), int(self.world_spawning_x/2)),
             y_bounds=(-int(self.world_spawning_y/2), int(self.world_spawning_y/2)),
+            walls = self.walls,
+            wall_configs = self.wall_configs, # Pass the wall configs to make sure we do not spawn entities on top of the walls
         )
 
         for agent in self.world.agents:
